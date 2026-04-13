@@ -1,0 +1,137 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint-and-build:
+    name: Lint & Build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      VITE_API_URL: http://localhost:5236/api
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npx tsc --noEmit
+      - run: npm run build
+
+  unit-tests:
+    name: Unit Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run test:coverage
+      - name: Upload coverage artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: coverage/
+          if-no-files-found: ignore
+          retention-days: 14
+
+  e2e-tests:
+    name: E2E Tests (mocked)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      VITE_API_URL: http://localhost:5236/api
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:e2e
+      - name: Upload Playwright report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report-mocked
+          path: playwright-report/
+          if-no-files-found: ignore
+          retention-days: 14
+
+  e2e-integration:
+    name: E2E Integration (Docker)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    if: ${{ vars.RUN_E2E == 'true' }}
+    env:
+      SA_PASSWORD: ${{ secrets.SA_PASSWORD }}
+      VITE_API_URL: http://localhost:5236/api
+    steps:
+      - name: Checkout React repo
+        uses: actions/checkout@v4
+
+      - name: Checkout .NET API repo
+        uses: actions/checkout@v4
+        with:
+          repository: rvnminers-A-and-N/sunroom-crm-dotnet
+          path: dotnet-api
+
+      - name: Start API via docker-compose
+        working-directory: dotnet-api
+        run: docker compose up -d --build
+
+      - name: Wait for API to be ready
+        run: |
+          for i in $(seq 1 60); do
+            if curl -s -o /dev/null --max-time 3 http://localhost:5236/; then
+              echo "API is ready"
+              exit 0
+            fi
+            sleep 3
+          done
+          echo "API failed to start"
+          docker compose -f dotnet-api/docker-compose.yml logs
+          exit 1
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium
+
+      - name: Run Playwright tests
+        run: npm run test:e2e
+
+      - name: Upload Playwright report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report-integration
+          path: playwright-report/
+          if-no-files-found: ignore
+          retention-days: 14
+
+      - name: Stop API containers
+        if: always()
+        working-directory: dotnet-api
+        run: docker compose down -v

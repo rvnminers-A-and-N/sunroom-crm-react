@@ -40,10 +40,12 @@ export default defineConfig({
         'coverage/**',
         'node_modules/**',
       ],
-      // 100% global thresholds are enabled in feature/ci-and-coverage-gate.
-      // Until then, each test branch verifies coverage on its own touched files
-      // by reading the per-file table emitted by `npm run test:coverage`.
-      thresholds: undefined,
+      thresholds: {
+        statements: 80,
+        branches: 80,
+        functions: 80,
+        lines: 80,
+      },
     },
   },
 });
