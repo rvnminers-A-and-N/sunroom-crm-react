@@ -1,11 +1,10 @@
 import { useState } from 'react';
-import { Link } from 'react-router-dom';
 import {
   Sparkles,
   Search,
   Brain,
-  User,
   Loader2,
+  TrendingUp,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -13,39 +12,35 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Textarea } from '@/components/ui/textarea';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { PageHeader } from '@shared/components/page-header';
-import { ActivityIcon } from '@shared/components/activity-icon';
-import { useSummarize, useSmartSearch } from '@core/hooks/use-ai';
-import type { SmartSearchResponse } from '@core/models/ai';
+import { useSummarizeStream, useSmartSearchStream, useDealInsightsStream } from '@core/hooks/use-ai-stream';
 
 export default function AiPanelPage() {
   // Smart Search state
   const [searchQuery, setSearchQuery] = useState('');
-  const [searchResult, setSearchResult] = useState<SmartSearchResponse | null>(
-    null,
-  );
-  const smartSearch = useSmartSearch();
+  const smartSearch = useSmartSearchStream();
 
   // Summarize state
   const [summarizeText, setSummarizeText] = useState('');
-  const [summaryResult, setSummaryResult] = useState<string | null>(null);
-  const summarize = useSummarize();
+  const summarize = useSummarizeStream();
+
+  // Deal Insights state
+  const [dealId, setDealId] = useState('');
+  const dealInsights = useDealInsightsStream();
 
   function handleSearch() {
     if (!searchQuery.trim()) return;
-    setSearchResult(null);
-    smartSearch.mutate(
-      { query: searchQuery },
-      { onSuccess: (result) => setSearchResult(result) },
-    );
+    smartSearch.stream(searchQuery);
   }
 
   function handleSummarize() {
     if (!summarizeText.trim()) return;
-    setSummaryResult(null);
-    summarize.mutate(
-      { text: summarizeText },
-      { onSuccess: (result) => setSummaryResult(result.summary) },
-    );
+    summarize.stream(summarizeText);
+  }
+
+  function handleGenerateInsights() {
+    const id = parseInt(dealId, 10);
+    if (isNaN(id) || id <= 0) return;
+    dealInsights.stream(id);
   }
 
   return (
@@ -64,6 +59,10 @@ export default function AiPanelPage() {
           <TabsTrigger value="summarize">
             <Sparkles className="h-4 w-4 mr-1.5" />
             Summarize
+          </TabsTrigger>
+          <TabsTrigger value="insights">
+            <TrendingUp className="h-4 w-4 mr-1.5" />
+            Deal Insights
           </TabsTrigger>
         </TabsList>
 
@@ -89,10 +88,10 @@ export default function AiPanelPage() {
                 </div>
                 <Button
                   onClick={handleSearch}
-                  disabled={smartSearch.isPending || !searchQuery.trim()}
+                  disabled={smartSearch.isStreaming || !searchQuery.trim()}
                   className="bg-sr-primary hover:bg-sr-primary-dark"
                 >
-                  {smartSearch.isPending ? (
+                  {smartSearch.isStreaming ? (
                     <Loader2 className="h-4 w-4 animate-spin" />
                   ) : (
                     'Search'
@@ -100,73 +99,26 @@ export default function AiPanelPage() {
                 </Button>
               </div>
 
-              {searchResult && (
-                <div className="mt-6 space-y-4">
-                  {searchResult.interpretation && (
-                    <div className="flex items-start gap-3 rounded-lg bg-muted/50 p-3">
-                      <Brain className="h-5 w-5 text-sr-primary shrink-0 mt-0.5" />
-                      <p className="text-sm">{searchResult.interpretation}</p>
-                    </div>
-                  )}
-
-                  {searchResult.contacts.length > 0 && (
-                    <div>
-                      <h4 className="text-sm font-semibold mb-2">
-                        Contacts ({searchResult.contacts.length})
-                      </h4>
-                      <div className="space-y-1">
-                        {searchResult.contacts.map((c) => (
-                          <Link
-                            key={c.id}
-                            to={`/contacts/${c.id}`}
-                            className="flex items-center gap-3 rounded-lg p-2.5 hover:bg-muted/50 transition-colors"
-                          >
-                            <User className="h-4 w-4 text-muted-foreground" />
-                            <span className="text-sm font-medium">
-                              {c.firstName} {c.lastName}
-                            </span>
-                            {c.companyName && (
-                              <span className="text-xs text-muted-foreground">
-                                {c.companyName}
-                              </span>
-                            )}
-                          </Link>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-
-                  {searchResult.activities.length > 0 && (
-                    <div>
-                      <h4 className="text-sm font-semibold mb-2">
-                        Activities ({searchResult.activities.length})
-                      </h4>
-                      <div className="space-y-1">
-                        {searchResult.activities.map((a) => (
-                          <div
-                            key={a.id}
-                            className="flex items-center gap-3 rounded-lg p-2.5 hover:bg-muted/50 transition-colors"
-                          >
-                            <ActivityIcon type={a.type} />
-                            <span className="text-sm font-medium">
-                              {a.subject}
-                            </span>
-                            <span className="text-xs text-muted-foreground">
-                              {a.type}
-                            </span>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-
-                  {searchResult.contacts.length === 0 &&
-                    searchResult.activities.length === 0 && (
-                      <p className="text-sm text-muted-foreground text-center py-4">
-                        No results found. Try rephrasing your question.
-                      </p>
+              {(smartSearch.text || smartSearch.isStreaming) && (
+                <div className="mt-6 rounded-lg bg-muted/50 p-4">
+                  <div className="flex items-center gap-2 mb-2">
+                    <Brain className="h-4 w-4 text-sr-primary" />
+                    <h4 className="text-sm font-semibold">Results</h4>
+                    {smartSearch.isStreaming && (
+                      <Loader2 className="h-3 w-3 animate-spin text-muted-foreground" />
                     )}
+                  </div>
+                  <p className="text-sm whitespace-pre-wrap">
+                    {smartSearch.text}
+                    {smartSearch.isStreaming && (
+                      <span className="inline-block w-1.5 h-4 bg-sr-primary animate-pulse ml-0.5 align-text-bottom" />
+                    )}
+                  </p>
                 </div>
+              )}
+
+              {smartSearch.error && (
+                <p className="mt-4 text-sm text-destructive">{smartSearch.error}</p>
               )}
             </CardContent>
           </Card>
@@ -191,27 +143,96 @@ export default function AiPanelPage() {
 
               <Button
                 onClick={handleSummarize}
-                disabled={summarize.isPending || !summarizeText.trim()}
+                disabled={summarize.isStreaming || !summarizeText.trim()}
                 className="bg-sr-primary hover:bg-sr-primary-dark"
               >
-                {summarize.isPending ? (
+                {summarize.isStreaming ? (
                   <Loader2 className="h-4 w-4 mr-2 animate-spin" />
                 ) : (
                   <Sparkles className="h-4 w-4 mr-2" />
                 )}
-                Summarize
+                {summarize.isStreaming ? 'Summarizing...' : 'Summarize'}
               </Button>
 
-              {summaryResult && (
+              {(summarize.text || summarize.isStreaming) && (
                 <div className="mt-6 rounded-lg bg-muted/50 p-4">
                   <div className="flex items-center gap-2 mb-2">
                     <Sparkles className="h-4 w-4 text-sr-gold" />
                     <h4 className="text-sm font-semibold">Summary</h4>
+                    {summarize.isStreaming && (
+                      <Loader2 className="h-3 w-3 animate-spin text-muted-foreground" />
+                    )}
                   </div>
                   <p className="text-sm whitespace-pre-wrap">
-                    {summaryResult}
+                    {summarize.text}
+                    {summarize.isStreaming && (
+                      <span className="inline-block w-1.5 h-4 bg-sr-primary animate-pulse ml-0.5 align-text-bottom" />
+                    )}
                   </p>
                 </div>
+              )}
+
+              {summarize.error && (
+                <p className="mt-4 text-sm text-destructive">{summarize.error}</p>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* Deal Insights Tab */}
+        <TabsContent value="insights" className="mt-4">
+          <Card>
+            <CardContent className="p-6">
+              <p className="text-sm text-muted-foreground mb-4">
+                Enter a deal ID to generate AI-powered insights and
+                recommendations.
+              </p>
+
+              <div className="flex gap-3">
+                <div className="relative flex-1">
+                  <TrendingUp className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                  <Input
+                    type="number"
+                    value={dealId}
+                    onChange={(e) => setDealId(e.target.value)}
+                    onKeyDown={(e) => e.key === 'Enter' && handleGenerateInsights()}
+                    placeholder="Enter deal ID..."
+                    className="pl-9"
+                  />
+                </div>
+                <Button
+                  onClick={handleGenerateInsights}
+                  disabled={dealInsights.isStreaming || !dealId.trim() || isNaN(parseInt(dealId, 10)) || parseInt(dealId, 10) <= 0}
+                  className="bg-sr-primary hover:bg-sr-primary-dark"
+                >
+                  {dealInsights.isStreaming ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    'Generate Insights'
+                  )}
+                </Button>
+              </div>
+
+              {(dealInsights.text || dealInsights.isStreaming) && (
+                <div className="mt-6 rounded-lg bg-muted/50 p-4">
+                  <div className="flex items-center gap-2 mb-2">
+                    <TrendingUp className="h-4 w-4 text-sr-primary" />
+                    <h4 className="text-sm font-semibold">Insights</h4>
+                    {dealInsights.isStreaming && (
+                      <Loader2 className="h-3 w-3 animate-spin text-muted-foreground" />
+                    )}
+                  </div>
+                  <p className="text-sm whitespace-pre-wrap">
+                    {dealInsights.text}
+                    {dealInsights.isStreaming && (
+                      <span className="inline-block w-1.5 h-4 bg-sr-primary animate-pulse ml-0.5 align-text-bottom" />
+                    )}
+                  </p>
+                </div>
+              )}
+
+              {dealInsights.error && (
+                <p className="mt-4 text-sm text-destructive">{dealInsights.error}</p>
               )}
             </CardContent>
           </Card>
