@@ -2,9 +2,7 @@ import { test, expect } from '@playwright/test';
 import { mockApi, loginAs } from './fixtures';
 
 test.describe('AI Panel', () => {
-  test('runs an AI search and renders the interpretation and result counts', async ({
-    page,
-  }) => {
+  test('runs a smart search and streams the result', async ({ page }) => {
     await mockApi(page);
     await loginAs(page);
 
@@ -16,12 +14,13 @@ test.describe('AI Panel', () => {
       .fill('Find recent VIP contacts');
     await page.getByRole('button', { name: 'Search' }).click();
 
-    await expect(page.getByText('Found matching results')).toBeVisible();
-    await expect(page.getByText(/Contacts \(2\)/)).toBeVisible();
-    await expect(page.getByText(/Activities \(1\)/)).toBeVisible();
+    // The streamed tokens accumulate into a single text block
+    await expect(
+      page.getByText('Based on your query, I found 2 relevant contacts who match your criteria.'),
+    ).toBeVisible();
   });
 
-  test('summarizes pasted text and shows the resulting card', async ({ page }) => {
+  test('summarizes pasted text and streams the result', async ({ page }) => {
     await mockApi(page);
     await loginAs(page);
 
@@ -32,6 +31,22 @@ test.describe('AI Panel', () => {
       .fill('Long meeting transcript that needs to be summarized.');
     await page.getByRole('button', { name: 'Summarize' }).click();
 
-    await expect(page.getByText('Concise summary of the input.')).toBeVisible();
+    await expect(
+      page.getByText('Here is a concise summary of the provided text.'),
+    ).toBeVisible();
+  });
+
+  test('generates deal insights via streaming', async ({ page }) => {
+    await mockApi(page);
+    await loginAs(page);
+
+    await page.goto('/ai');
+    await page.getByRole('tab', { name: /Deal Insights/ }).click();
+    await page.getByPlaceholder(/Enter deal ID/).fill('1');
+    await page.getByRole('button', { name: 'Generate Insights' }).click();
+
+    await expect(
+      page.getByText('This deal shows strong potential with a high likelihood of closing.'),
+    ).toBeVisible();
   });
 });

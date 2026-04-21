@@ -165,6 +165,16 @@ function json(route: Route, body: unknown, status = 200) {
   });
 }
 
+function sse(route: Route, tokens: string[]) {
+  const lines = tokens.map((t) => `data: ${JSON.stringify({ token: t })}\n\n`);
+  lines.push('data: [DONE]\n\n');
+  return route.fulfill({
+    status: 200,
+    contentType: 'text/event-stream',
+    body: lines.join(''),
+  });
+}
+
 /**
  * Sets up route interception for ALL backend endpoints used by the SPA.
  * Call this once per test, before any navigation.
@@ -348,16 +358,25 @@ export async function mockApi(page: Page, overrides: ApiOverrides = {}) {
       return json(route, users);
     }
 
-    // ----- AI -----
-    if (path === '/ai/search' && method === 'POST') {
-      return json(route, {
-        interpretation: 'Found matching results',
-        contacts,
-        activities,
-      });
+    // ----- AI (SSE Streaming) -----
+    if (path === '/ai/search/stream' && method === 'POST') {
+      return sse(route, [
+        'Based on your query, ',
+        'I found 2 relevant contacts ',
+        'who match your criteria.',
+      ]);
     }
-    if (path === '/ai/summarize' && method === 'POST') {
-      return json(route, { summary: 'Concise summary of the input.' });
+    if (path === '/ai/summarize/stream' && method === 'POST') {
+      return sse(route, [
+        'Here is a concise summary ',
+        'of the provided text.',
+      ]);
+    }
+    if (/^\/ai\/deal-insights\/\d+\/stream$/.test(path) && method === 'POST') {
+      return sse(route, [
+        'This deal shows strong potential ',
+        'with a high likelihood of closing.',
+      ]);
     }
 
     // Anything else: empty success
