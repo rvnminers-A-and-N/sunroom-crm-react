@@ -252,4 +252,206 @@ describe('AiPanelPage', () => {
       expect(document.querySelector('.animate-spin')).not.toBeNull();
     });
   });
+
+  // ---------- Deal Insights tab ----------
+
+  it('renders the Deal Insights tab', async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<AiPanelPage />);
+
+    expect(screen.getByRole('tab', { name: /Deal Insights/ })).toBeInTheDocument();
+    await user.click(screen.getByRole('tab', { name: /Deal Insights/ }));
+    expect(screen.getByPlaceholderText(/Enter deal ID/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Generate Insights/ })).toBeInTheDocument();
+  });
+
+  it('disables the Generate Insights button when dealId is empty or invalid', async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<AiPanelPage />);
+
+    await user.click(screen.getByRole('tab', { name: /Deal Insights/ }));
+    const button = screen.getByRole('button', { name: /Generate Insights/ });
+    expect(button).toBeDisabled();
+  });
+
+  it('runs deal insights and renders streamed text', async () => {
+    server.use(
+      http.post(url('/ai/deal-insights/42/stream'), () =>
+        sseStreamResponse(['Strong', ' pipeline', ' ahead']),
+      ),
+    );
+
+    const user = userEvent.setup();
+    renderWithProviders(<AiPanelPage />);
+
+    await user.click(screen.getByRole('tab', { name: /Deal Insights/ }));
+    const input = screen.getByPlaceholderText(/Enter deal ID/);
+    await user.type(input, '42');
+    await user.click(screen.getByRole('button', { name: /Generate Insights/ }));
+
+    expect(await screen.findByText('Strong pipeline ahead')).toBeInTheDocument();
+    expect(screen.getByText('Insights')).toBeInTheDocument();
+  });
+
+  it('runs deal insights via the Enter key', async () => {
+    server.use(
+      http.post(url('/ai/deal-insights/7/stream'), () =>
+        sseStreamResponse(['enter-insight']),
+      ),
+    );
+
+    const user = userEvent.setup();
+    renderWithProviders(<AiPanelPage />);
+
+    await user.click(screen.getByRole('tab', { name: /Deal Insights/ }));
+    const input = screen.getByPlaceholderText(/Enter deal ID/);
+    await user.type(input, '7');
+    await user.keyboard('{Enter}');
+    expect(await screen.findByText('enter-insight')).toBeInTheDocument();
+  });
+
+  it('returns early from handleGenerateInsights when dealId is NaN', async () => {
+    let streamCalled = false;
+    server.use(
+      http.post(url('/ai/deal-insights/:id/stream'), () => {
+        streamCalled = true;
+        return sseStreamResponse(['should not happen']);
+      }),
+    );
+
+    const user = userEvent.setup();
+    renderWithProviders(<AiPanelPage />);
+
+    await user.click(screen.getByRole('tab', { name: /Deal Insights/ }));
+    const input = screen.getByPlaceholderText(/Enter deal ID/);
+    // Type non-numeric text to trigger the NaN guard in handleGenerateInsights
+    await user.type(input, 'abc');
+
+    // The button is disabled for invalid input, so we force-invoke onClick
+    // via the React fiber props to cover the early-return guard (lines 41-43).
+    const button = screen.getByRole('button', { name: /Generate Insights/ });
+    const fiberKey = Object.keys(button).find((k) =>
+      k.startsWith('__reactProps$'),
+    ) as keyof typeof button | undefined;
+    if (!fiberKey) throw new Error('React props fiber key not found');
+    const props = (button as unknown as Record<string, { onClick?: () => void }>)[
+      fiberKey as string
+    ];
+    props?.onClick?.();
+
+    await new Promise((r) => setTimeout(r, 30));
+    expect(streamCalled).toBe(false);
+  });
+
+  it('returns early from handleGenerateInsights when dealId is <= 0', async () => {
+    let streamCalled = false;
+    server.use(
+      http.post(url('/ai/deal-insights/:id/stream'), () => {
+        streamCalled = true;
+        return sseStreamResponse(['should not happen']);
+      }),
+    );
+
+    const user = userEvent.setup();
+    renderWithProviders(<AiPanelPage />);
+
+    await user.click(screen.getByRole('tab', { name: /Deal Insights/ }));
+    const input = screen.getByPlaceholderText(/Enter deal ID/);
+    await user.type(input, '-5');
+
+    // Force-invoke onClick to cover the <= 0 guard
+    const button = screen.getByRole('button', { name: /Generate Insights/ });
+    const fiberKey = Object.keys(button).find((k) =>
+      k.startsWith('__reactProps$'),
+    ) as keyof typeof button | undefined;
+    if (!fiberKey) throw new Error('React props fiber key not found');
+    const props = (button as unknown as Record<string, { onClick?: () => void }>)[
+      fiberKey as string
+    ];
+    props?.onClick?.();
+
+    await new Promise((r) => setTimeout(r, 30));
+    expect(streamCalled).toBe(false);
+  });
+
+  it('shows a spinner on the Generate Insights button while streaming', async () => {
+    server.use(
+      http.post(url('/ai/deal-insights/1/stream'), () => sseStreamPending()),
+    );
+
+    const user = userEvent.setup();
+    renderWithProviders(<AiPanelPage />);
+
+    await user.click(screen.getByRole('tab', { name: /Deal Insights/ }));
+    const input = screen.getByPlaceholderText(/Enter deal ID/);
+    await user.type(input, '1');
+    await user.click(screen.getByRole('button', { name: /Generate Insights/ }));
+
+    await waitFor(() => {
+      expect(document.querySelector('.animate-spin')).not.toBeNull();
+    });
+  });
+
+  // ---------- Error display branches ----------
+
+  it('displays search error message (branch at line 120)', async () => {
+    server.use(
+      http.post(url('/ai/search/stream'), () =>
+        new HttpResponse(null, { status: 500 }),
+      ),
+    );
+
+    const user = userEvent.setup();
+    renderWithProviders(<AiPanelPage />);
+
+    const input = screen.getByPlaceholderText(/Who did I talk to/);
+    await user.type(input, 'search that fails');
+    await user.click(screen.getByRole('button', { name: 'Search' }));
+
+    expect(
+      await screen.findByText('Stream request failed: 500'),
+    ).toBeInTheDocument();
+  });
+
+  it('displays summarize error message (branch at line 175)', async () => {
+    server.use(
+      http.post(url('/ai/summarize/stream'), () =>
+        new HttpResponse(null, { status: 500 }),
+      ),
+    );
+
+    const user = userEvent.setup();
+    renderWithProviders(<AiPanelPage />);
+
+    await user.click(screen.getByRole('tab', { name: /Summarize/ }));
+    await user.type(
+      screen.getByPlaceholderText(/Paste your meeting notes/),
+      'text that fails',
+    );
+    await user.click(screen.getByRole('button', { name: /Summarize/ }));
+
+    expect(
+      await screen.findByText('Stream request failed: 500'),
+    ).toBeInTheDocument();
+  });
+
+  it('displays deal insights error message (branch at line 234)', async () => {
+    server.use(
+      http.post(url('/ai/deal-insights/55/stream'), () =>
+        new HttpResponse(null, { status: 500 }),
+      ),
+    );
+
+    const user = userEvent.setup();
+    renderWithProviders(<AiPanelPage />);
+
+    await user.click(screen.getByRole('tab', { name: /Deal Insights/ }));
+    const input = screen.getByPlaceholderText(/Enter deal ID/);
+    await user.type(input, '55');
+    await user.click(screen.getByRole('button', { name: /Generate Insights/ }));
+
+    expect(
+      await screen.findByText('Stream request failed: 500'),
+    ).toBeInTheDocument();
+  });
 });
